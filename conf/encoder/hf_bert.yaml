@@ -5,8 +5,8 @@ encoder_model_type: hf_bert
 
 # HuggingFace's config name for model initialization
 # pretrained_model_cfg: bert-base-uncased
-pretrained_model_cfg: clue/roberta_chinese_3L312_clue_tiny
-# pretrained_model_cfg: clue/roberta_chinese_clue_large
+# pretrained_model_cfg: clue/roberta_chinese_3L312_clue_tiny
+pretrained_model_cfg: clue/roberta_chinese_clue_large
  
 
 # Some encoders need to be initialized from a file

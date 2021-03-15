@@ -50,9 +50,72 @@ from dpr.utils.model_utils import (
     load_states_from_checkpoint,
 )
 
+import deepspeed
+from deepspeed.ops.adam import DeepSpeedCPUAdam
+
 logger = logging.getLogger()
 setup_logger(logger)
 
+
+def get_ds_config(cfg):
+    bucket_size = 5000000 
+
+    return {
+        'zero_optimization': {
+            'stage': 2,
+            'cpu_offload': True,
+            'contiguous_gradients': True,
+            # https://github.com/microsoft/DeepSpeed/issues/467
+            'overlap_comm': False,
+            # 'reduce_bucket_size': 50000000
+            # too small will failed with large dimension size
+            'reduce_bucket_size': bucket_size,
+            'allgather_bucket_size': bucket_size,
+            },
+        'train_batch_size': cfg.train.batch_size * (cfg.distributed_world_size or 1),
+        "gradient_accumulation_steps": cfg.train.gradient_accumulation_steps,
+        'fp16': {
+            'enabled': True,
+            "loss_scale": 0,
+            "loss_scale_window": 1000,
+            "hysteresis": 2,
+            "min_loss_scale": 1,
+            },
+          "activation_checkpointing": {
+            "partition_activations": True,
+            "contiguous_memory_optimization": True,
+            "cpu_checkpointing": True
+          }, 
+         "wall_clock_breakdown": False,
+         # 'optimizer': {'type': 'AdamW', 'params': {'lr': 0.001}},
+
+         # XXX: progressive_layer_drop just can be used in pretrain, and have to change model
+         #      see: https://github.com/microsoft/DeepSpeedExamples/blob/fa1d1a71c48623db8a091d9cf636a5fe3b8f43c7/bing_bert/nvidia/modelingpreln_layerdrop.py#L667
+          "progressive_layer_drop": {
+            "enabled": False,
+            "theta": 0.5,
+            "gamma": 0.001
+          } 
+    }
+             
+
+def dist_init(cfg):
+    """Initialize torch.distributed."""
+    import torch.distributed as dist
+
+    init_method = 'tcp://'
+    master_ip = os.getenv('MASTER_ADDR')
+    master_port = os.getenv('MASTER_PORT')
+    init_method += master_ip + ':' + master_port
+    dist.init_process_group(
+        backend='nccl',
+        world_size=cfg.distributed_world_size, rank=cfg.local_rank,
+        init_method=init_method)
+
+
+def dist_cleanup():
+    dist.destroy_process_group()
+     
 
 class BiEncoderTrainer(object):
     """
@@ -79,6 +142,34 @@ class BiEncoderTrainer(object):
             cfg.encoder.encoder_model_type, cfg
         )
 
+        if cfg.deepspeed:
+            model.half()
+
+            # XXX
+           #no_decay = ["bias", "LayerNorm.weight"]
+           #
+           #optimizer_grouped_parameters = [
+           #    {
+           #        "params": [
+           #            p
+           #            for n, p in model.named_parameters()
+           #            if not any(nd in n for nd in no_decay)
+           #        ],
+           #        "weight_decay": cfg.train.weight_decay,
+           #    },
+           #    {
+           #        "params": [
+           #            p
+           #            for n, p in model.named_parameters()
+           #            if any(nd in n for nd in no_decay)
+           #        ],
+           #        "weight_decay": 0.0,
+           #    },
+           #]
+    
+            optimizer = DeepSpeedCPUAdam(optimizer.param_groups, lr=cfg.train.learning_rate, 
+                    weight_decay=cfg.train.weight_decay)
+
         model, optimizer = setup_for_distributed_mode(
             model,
             optimizer,
@@ -88,6 +179,7 @@ class BiEncoderTrainer(object):
             cfg.fp16,
             cfg.fp16_opt_level,
         )
+
         self.biencoder = model
         self.optimizer = optimizer
         self.tensorizer = tensorizer
@@ -197,6 +289,14 @@ class BiEncoderTrainer(object):
                 self.optimizer, warmup_steps, total_updates
             )
 
+        if cfg.deepspeed:
+            self.biencoder, self.optimizer, _, scheduler = deepspeed.initialize(
+                    model=self.biencoder, 
+                    optimizer=self.optimizer, 
+                    lr_scheduler=scheduler,
+                    args=cfg, 
+                    config_params=get_ds_config(cfg)) 
+             
         eval_step = math.ceil(updates_per_epoch / cfg.train.eval_per_epoch)
         logger.info("  Eval step = %d", eval_step)
         logger.info("***** Training *****")
@@ -544,16 +644,21 @@ class BiEncoderTrainer(object):
                         amp.master_params(self.optimizer), cfg.train.max_grad_norm
                     )
             else:
-                loss.backward()
-                if cfg.train.max_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.biencoder.parameters(), cfg.train.max_grad_norm
-                    )
+                if cfg.deepspeed:
+                    self.biencoder.backward(loss)
+                    self.biencoder.step()
+                else:
+                    loss.backward()
+                    if cfg.train.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.biencoder.parameters(), cfg.train.max_grad_norm
+                        )
 
-            if (i + 1) % cfg.train.gradient_accumulation_steps == 0:
-                self.optimizer.step()
-                scheduler.step()
-                self.biencoder.zero_grad()
+            if not cfg.deepspeed:
+                if (i + 1) % cfg.train.gradient_accumulation_steps == 0:
+                    self.optimizer.step()
+                    scheduler.step()
+                    self.biencoder.zero_grad()
 
             if i % log_result_step == 0:
                 lr = self.optimizer.param_groups[0]["lr"]
@@ -797,7 +902,15 @@ def main(cfg: DictConfig):
 
     if cfg.output_dir is not None:
         os.makedirs(cfg.output_dir, exist_ok=True)
-
+           
+    if cfg.deepspeed:
+        os.environ.setdefault('RANK', '0')
+        os.environ.setdefault('LOCAL_RANK', '0')
+        os.environ.setdefault('WORLD_SIZE', '1')
+        os.environ.setdefault('MASTER_PORT', '3600')
+        os.environ.setdefault('MASTER_ADDR', '127.0.0.1') 
+           
+    # dist_init in
     cfg = setup_cfg_gpu(cfg)
     set_seed(cfg)
 
@@ -819,6 +932,9 @@ def main(cfg: DictConfig):
         logger.warning(
             "Neither train_file or (model_file & dev_file) parameters are specified. Nothing to do."
         )
+
+    if cfg.deepspeed:
+        dist_cleanup()
 
 
 if __name__ == "__main__":

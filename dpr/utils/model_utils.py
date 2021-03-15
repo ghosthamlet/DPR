@@ -62,6 +62,11 @@ def setup_for_distributed_mode(
             model,
             device_ids=[device if device else local_rank],
             output_device=local_rank,
+            # XXX: normal model without DDP will not fail for unused_parameters,
+            #      enable DDP, disable this and deepspeed for debug, deepspeed auto enabled this
+            #      in deepspeed zero stage2 offload, unused_parameters will cause self.norm_for_param_grads KeyError
+            # XXX: as some params did not for calc loss, did not run backward hook and have no norm_for_param_grads
+            # see: https://github.com/microsoft/DeepSpeed/issues/707
             find_unused_parameters=True,
         )
     return model, optimizer
@@ -145,7 +150,16 @@ def init_weights(modules: List):
 
 
 def get_model_obj(model: nn.Module):
-    return model.module if hasattr(model, "module") else model
+    # return model.module if hasattr(model, "module") else model
+
+    from deepspeed.runtime.engine import DeepSpeedEngine
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    tf_model = model
+    while isinstance(tf_model, (DeepSpeedEngine, DDP)):
+        tf_model = tf_model.module
+
+    return tf_model
 
 
 def get_model_file(args, file_prefix) -> str:

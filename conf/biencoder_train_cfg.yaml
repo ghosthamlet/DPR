@@ -23,9 +23,13 @@ checkpoint_file_name: dpr_biencoder
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
 
+
+deepspeed: True
 # TODO: move to a conf group
 # local_rank for distributed training on gpus
-local_rank: -1
+# local_rank: -1
+# for DeepSpeed
+local_rank: 0
 global_loss_buf_sz: 592000
 device:
 distributed_world_size:
