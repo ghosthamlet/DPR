@@ -3,11 +3,12 @@
 defaults:
   - encoder: hf_bert
   - train: biencoder_default
-  - datasets: dpr_default
+    # - datasets: dpr_default
+  - datasets: encoder_train_default
 
-train_datasets:
-dev_datasets:
-output_dir:
+train_datasets: [plot_train]
+dev_datasets: [plot_dev]
+output_dir: models/
 train_sampling_rates:
 loss_scale_factors:
 
@@ -39,6 +40,20 @@ fp16_opt_level: O1
 
 # tokens which won't be slit by tokenizer
 special_tokens:
+    - [KEYWORD]
+    - [TITLE]
+    - [START_PLOT]
+    - [END_PLOT]
+    - [NL]
+    - [EOA]
+    - [COA]
+    - [SOA]
+    - [END_QUOTE]
+    - [DIALOG]
+    - [NARRATION]
+    - [STATIC_KEYWORD]
+    - [DYNAMIC_KEYWORD]
+    - [GEN_KEYWORD]
 
 ignore_checkpoint_offset: False
 ignore_checkpoint_optimizer: False

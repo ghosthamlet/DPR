@@ -27,3 +27,12 @@ squad1_train:
 squad1_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.squad1-dev
+
+plot_train:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  # XXX: can't use ~/
+  file: /home/han300hu/work/AI/ai-research/novel/gen_novel/datas/datasets/novel.scifi.parsed.json.retriever.train.json
+
+plot_dev:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: /home/han300hu/work/AI/ai-research/novel/gen_novel/datas/datasets/novel.scifi.parsed.json.retriever.dev.json

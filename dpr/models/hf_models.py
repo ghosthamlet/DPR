@@ -113,12 +113,12 @@ def _add_special_tokens(tokenizer, special_tokens):
     # TODO: this is a hack-y logic that uses some private tokenizer structure which can be changed in HF code
     assert special_tokens_num < 50
     unused_ids = [
-        tokenizer.vocab["[unused{}]".format(i)] for i in range(special_tokens_num)
+        tokenizer.vocab["[unused{}]".format(i+1)] for i in range(special_tokens_num)
     ]
     logger.info("Utilizing the following unused token ids %s", unused_ids)
 
     for idx, id in enumerate(unused_ids):
-        del tokenizer.vocab["[unused{}]".format(idx)]
+        del tokenizer.vocab["[unused{}]".format(idx+1)]
         tokenizer.vocab[special_tokens[idx]] = id
         tokenizer.ids_to_tokens[id] = special_tokens[idx]
 

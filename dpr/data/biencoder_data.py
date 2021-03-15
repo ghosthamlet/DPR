@@ -13,7 +13,7 @@ import torch
 from omegaconf import DictConfig
 from torch import Tensor as T
 
-from dpr.data.tables import Table
+# from dpr.data.tables import Table
 from dpr.utils.data_utils import read_data_from_json_files, Tensorizer
 
 logger = logging.getLogger(__name__)
@@ -205,40 +205,7 @@ def normalize_question(question: str) -> str:
     question = question.replace("’", "'")
     return question
 
-
-class Cell:
-    def __init__(self):
-        self.value_tokens: List[str] = []
-        self.type: str = ""
-        self.nested_tables: List[Table] = []
-
-    def __str__(self):
-        return " ".join(self.value_tokens)
-
-    def to_dpr_json(self, cell_idx: int):
-        r = {"col": cell_idx}
-        r["value"] = str(self)
-        return r
-
-
-class Row:
-    def __init__(self):
-        self.cells: List[Cell] = []
-
-    def __str__(self):
-        return "| ".join([str(c) for c in self.cells])
-
-    def visit(self, tokens_function, row_idx: int):
-        for i, c in enumerate(self.cells):
-            if c.value_tokens:
-                tokens_function(c.value_tokens, row_idx, i)
-
-    def to_dpr_json(self, row_idx: int):
-        r = {"row": row_idx}
-        r["columns"] = [c.to_dpr_json(i) for i, c in enumerate(self.cells)]
-        return r
-
-
+ 
 class Table(object):
     def __init__(self, caption=""):
         self.caption = caption
@@ -273,6 +240,40 @@ class Table(object):
         if self.gold_match:
             r["gold_match"] = 1
         return r
+       
+
+class Cell:
+    def __init__(self):
+        self.value_tokens: List[str] = []
+        self.type: str = ""
+        self.nested_tables: List[Table] = []
+
+    def __str__(self):
+        return " ".join(self.value_tokens)
+
+    def to_dpr_json(self, cell_idx: int):
+        r = {"col": cell_idx}
+        r["value"] = str(self)
+        return r
+
+
+class Row:
+    def __init__(self):
+        self.cells: List[Cell] = []
+
+    def __str__(self):
+        return "| ".join([str(c) for c in self.cells])
+
+    def visit(self, tokens_function, row_idx: int):
+        for i, c in enumerate(self.cells):
+            if c.value_tokens:
+                tokens_function(c.value_tokens, row_idx, i)
+
+    def to_dpr_json(self, row_idx: int):
+        r = {"row": row_idx}
+        r["columns"] = [c.to_dpr_json(i) for i, c in enumerate(self.cells)]
+        return r
+
 
 
 class NQTableParser(object):
